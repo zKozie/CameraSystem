@@ -134,7 +134,9 @@ local localPlayer = game:GetService("Players").LocalPlayer
 localPlayer.CameraMaxZoomDistance = localPlayer.CameraMinZoomDistance
 ```
 
-- `Destroy` restores the `CameraType` captured at construction, handing the camera back to Roblox.
+- The mouse cursor is hidden (`MouseIconEnabled = false`) for the controller's lifetime.
+- `Destroy` restores the `CameraType` and cursor visibility captured at construction, handing the camera back to Roblox.
+- Disable Roblox's own shift-lock switch so it can't fight the rig — it's a Studio/Rojo property, out of a LocalScript's reach: set `StarterPlayer.EnableMouseLockOption = false` (in Rojo: `"StarterPlayer": { "$properties": { "EnableMouseLockOption": false } }`).
 
 ---
 

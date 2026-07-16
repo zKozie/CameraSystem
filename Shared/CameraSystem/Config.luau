@@ -16,14 +16,14 @@ return {
 	States = {
 		Idle = {
 			-- Same framing as Walking with no bob — the camera holds still while idle
-			Offset = CFrame.new(3, 2, 10),
+			Offset = CFrame.new(3, 2, 6.5),
 			HoverAmplitude = 0,
 			HoverFrequency = 0,
 			Smoothing = 8,
 		},
 		Walking = {
 			-- +3 X puts the camera over the right shoulder (~20 degrees horizontal)
-			Offset = CFrame.new(3, 2, 10),
+			Offset = CFrame.new(3, 2, 9),
 			HoverAmplitude = 0.15,
 			HoverFrequency = 0.8,
 			Smoothing = 8,

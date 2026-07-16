@@ -2,6 +2,7 @@
 
 --// SERVICES
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 
 --// TYPES
 local Types = require(script.Types)
@@ -38,8 +39,11 @@ function CameraSystem.new(camera: Camera, config: CameraConfig): CameraControlle
 	self._lookYaw = 0
 	self._lookPitch = 0
 	self._previousCameraType = camera.CameraType
+	self._previousMouseIconEnabled = UserInputService.MouseIconEnabled
 
 	camera.CameraType = Enum.CameraType.Scriptable
+	-- Full control includes the cursor: hidden for the controller's lifetime
+	UserInputService.MouseIconEnabled = false
 	return self
 end
 
@@ -171,9 +175,10 @@ function CameraSystem.Update(self: CameraController, deltaTime: number)
 	self.Camera.CFrame = CameraSystem._applyActionLayer(self, lookRig, smoothedCFrame, deltaTime)
 end
 
--- Restores the camera type and clears live references; controller is dead after this
+-- Restores the camera type and cursor and clears live references; controller is dead after this
 function CameraSystem.Destroy(self: CameraController)
 	self.Camera.CameraType = self._previousCameraType
+	UserInputService.MouseIconEnabled = self._previousMouseIconEnabled
 	self._activeAction = nil
 	self.Subject = nil
 end
