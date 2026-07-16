@@ -2,9 +2,10 @@
 
 A small, config-driven camera controller for Roblox. Designed to be dropped into any project as a Git submodule — add it once, define your own states and actions in a config table.
 
-The camera is driven by two blended layers:
+The camera is a mouse-look rig (shift-lock style) with two blended layers on top:
 
-- **State layer** — the source of truth. The active state defines where the camera belongs (an offset from the subject), a procedural hover bob, and how quickly the camera converges there. The camera always settles here when nothing else is happening.
+- **Look rig** — subject position + yaw/pitch angles steered by `AddLookDelta`. The subject's own rotation plays no part; instead your character-facing logic reads `GetLookDirection()` and turns the character to follow the camera.
+- **State layer** — the source of truth. The active state defines where the camera belongs (an offset from the look rig), a procedural hover bob, and how quickly the camera converges there. The camera always settles here when nothing else is happening.
 - **Action layer** — one-shot overlays. An action plays a keyframed camera movement at full override weight, then smoothly blends back into the live state camera — the return target is wherever the state camera is *by then*, so it stays correct even if the subject moved.
 
 The controller never binds its own loop — you drive `Update(deltaTime)` from RenderStep, so it contains no behaviour it doesn't own.
@@ -60,7 +61,15 @@ local controller = CameraSystem.new(workspace.CurrentCamera, CameraConfig)
 controller:SetSubject(character:WaitForChild("HumanoidRootPart"))
 
 RunService:BindToRenderStep("CameraSystem", Enum.RenderPriority.Camera.Value, function(deltaTime)
+    UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter -- core scripts reset this
     controller:Update(deltaTime)
+end)
+
+-- Mouse steers the look rig
+local MOUSE_SENSITIVITY = 0.003
+UserInputService.InputChanged:Connect(function(changedInput)
+    if changedInput.UserInputType ~= Enum.UserInputType.MouseMovement then return end
+    controller:AddLookDelta(-changedInput.Delta.X * MOUSE_SENSITIVITY, -changedInput.Delta.Y * MOUSE_SENSITIVITY)
 end)
 
 controller:SetState("Running")   -- the state layer is now the Running truth
@@ -68,7 +77,9 @@ controller:PlayAction("Impact")  -- one-shot; blends back to Running when done
 ```
 
 - `CameraSystem.new(camera, config)` — builds the controller, sets the camera `Scriptable`, and enters `config.InitialState`.
-- `controller:SetSubject(part)` — the part the camera follows; `Update` is a no-op while `nil` (pass `nil` between respawns).
+- `controller:SetSubject(part)` — the part the camera follows; seeds the look yaw from the part's facing so the camera starts behind it. `Update` is a no-op while `nil` (pass `nil` between respawns).
+- `controller:AddLookDelta(yawDelta, pitchDelta)` — steers the look rig, radians; pitch clamps to `config.PitchLimits`. Feed it mouse deltas (negate both axes, scale by sensitivity).
+- `controller:GetLookDirection()` — unit vector the rig faces along; drive character rotation from this.
 - `controller:SetState(name)` — switches the state-layer truth; the camera converges there at the new state's `Smoothing` rate.
 - `controller:SetOffset(offset)` — runtime offset composed after every state/action offset (shoulder cam, aiming). Persists across state changes and actions; `nil` clears it.
 - `controller:PlayAction(name)` — starts a one-shot action, replacing any action already playing.
@@ -85,10 +96,11 @@ The system decides nothing about *when* to change states — that logic belongs 
 return {
     InitialState = "Walking",
     DefaultReturnTime = 0.4, -- action blend-back seconds when ReturnTime is nil
+    PitchLimits = { Min = math.rad(-80), Max = math.rad(80) }, -- mouse-look clamp
 
     States = {
         Walking = {
-            Offset = CFrame.new(0, 2, 10), -- relative to the subject's CFrame
+            Offset = CFrame.new(3, 2, 10), -- relative to the look rig; +X = right shoulder
             HoverAmplitude = 0.15,         -- bob height in studs; 0 disables
             HoverFrequency = 0.8,          -- bob cycles per second
             Smoothing = 8,                 -- follow rate; higher converges faster
@@ -128,7 +140,7 @@ localPlayer.CameraMaxZoomDistance = localPlayer.CameraMinZoomDistance
 
 ## Rules
 
-- Offsets are relative to the subject: `+Z` sits behind a subject facing `-Z` (HumanoidRootPart convention).
+- Offsets are relative to the **look rig**: `+Z` sits behind the look direction, `+X` to its right (shoulder cam). The subject's own rotation never affects the camera.
 - An action's first keyframe travels from the **active state's offset**, so actions read naturally from any state.
 - `EasingStyle` / `EasingDirection` default to `Quad` / `Out` per keyframe.
 - One controller per camera lifetime — call `Destroy` before constructing another.

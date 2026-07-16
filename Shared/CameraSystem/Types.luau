@@ -1,10 +1,10 @@
 --!strict
 
 -- One camera state definition — the "truth" placement of the camera while the
--- state is active. Owned by CameraSystem. `Offset` is relative to the subject's
--- CFrame, so the camera follows the subject's position and facing.
+-- state is active. Owned by CameraSystem. `Offset` is relative to the look rig
+-- (subject position + mouse-look rotation) — subject facing plays no part.
 export type CameraStateEntry = {
-	Offset: CFrame, -- camera placement relative to the subject
+	Offset: CFrame, -- camera placement relative to the look rig
 	HoverAmplitude: number, -- vertical hover bob height in studs; 0 disables it
 	HoverFrequency: number, -- hover bob cycles per second
 	Smoothing: number, -- follow responsiveness per second; higher converges faster
@@ -28,12 +28,21 @@ export type CameraActionEntry = {
 	ReturnTime: number?, -- blend-back seconds; nil falls back to DefaultReturnTime
 }
 
+-- Vertical look clamp in radians, applied by AddLookDelta.
+-- Owned by CameraSystem. Min is the steepest look-down (negative), Max the
+-- steepest look-up (positive).
+export type PitchLimits = {
+	Min: number,
+	Max: number,
+}
+
 -- The single configuration table passed to CameraSystem.new.
 -- Owned by CameraSystem. Config.luau is the shipped template; a game may pass
 -- its own table of the same shape instead of editing the module.
 export type CameraConfig = {
 	InitialState: string, -- key into States entered at construction
 	DefaultReturnTime: number, -- blend-back seconds for actions without ReturnTime
+	PitchLimits: PitchLimits, -- how far the look rig may pitch up/down
 	States: {[string]: CameraStateEntry},
 	Actions: {[string]: CameraActionEntry},
 }
@@ -61,6 +70,8 @@ export type CameraController = {
 	SetSubject: (self: CameraController, subject: BasePart?) -> (),
 	SetState: (self: CameraController, stateName: string) -> (),
 	SetOffset: (self: CameraController, offset: CFrame?) -> (),
+	AddLookDelta: (self: CameraController, yawDelta: number, pitchDelta: number) -> (),
+	GetLookDirection: (self: CameraController) -> (Vector3),
 	PlayAction: (self: CameraController, actionName: string) -> (),
 	Update: (self: CameraController, deltaTime: number) -> (),
 	Destroy: (self: CameraController) -> (),
@@ -68,6 +79,8 @@ export type CameraController = {
 	_clock: number, -- internal: accumulated time driving the hover bob
 	_activeAction: ActiveAction?, -- internal: nil when no action is playing
 	_extraOffset: CFrame, -- internal: runtime offset from SetOffset; identity when unset
+	_lookYaw: number, -- internal: horizontal look angle in radians, mouse-driven
+	_lookPitch: number, -- internal: vertical look angle in radians, clamped to PitchLimits
 	_previousCameraType: Enum.CameraType, -- internal: restored on Destroy
 }
 

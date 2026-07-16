@@ -35,15 +35,35 @@ function CameraSystem.new(camera: Camera, config: CameraConfig): CameraControlle
 	self._clock = 0
 	self._activeAction = nil
 	self._extraOffset = CFrame.identity
+	self._lookYaw = 0
+	self._lookPitch = 0
 	self._previousCameraType = camera.CameraType
 
 	camera.CameraType = Enum.CameraType.Scriptable
 	return self
 end
 
--- Points the camera at a new subject; nil freezes the camera until one is set
+-- Points the camera at a new subject and seeds the look yaw from its facing,
+-- so the camera starts behind it; nil freezes the camera until one is set
 function CameraSystem.SetSubject(self: CameraController, subject: BasePart?)
 	self.Subject = subject
+	if not subject then return end
+
+	local subjectFacing = subject.CFrame.LookVector
+	self._lookYaw = math.atan2(-subjectFacing.X, -subjectFacing.Z)
+	self._lookPitch = 0
+end
+
+-- Steers the look rig by radians; pitch is clamped to config.PitchLimits
+function CameraSystem.AddLookDelta(self: CameraController, yawDelta: number, pitchDelta: number)
+	local pitchLimits = self._config.PitchLimits
+	self._lookYaw += yawDelta
+	self._lookPitch = math.clamp(self._lookPitch + pitchDelta, pitchLimits.Min, pitchLimits.Max)
+end
+
+-- Unit vector the look rig faces along; feed this to character-facing logic
+function CameraSystem.GetLookDirection(self: CameraController): Vector3
+	return CFrame.fromEulerAnglesYXZ(self._lookPitch, self._lookYaw, 0).LookVector
 end
 
 -- Sets a runtime offset composed after every state/action offset (shoulder cam,
@@ -71,11 +91,11 @@ function CameraSystem.PlayAction(self: CameraController, actionName: string)
 	}
 end
 
--- State-layer goal: subject * state offset * vertical hover bob
-function CameraSystem._computeStateCFrame(self: CameraController, subjectCFrame: CFrame): CFrame
+-- State-layer goal: look rig * state offset * vertical hover bob
+function CameraSystem._computeStateCFrame(self: CameraController, lookRig: CFrame): CFrame
 	local state = self._config.States[self.StateName]
 	local hoverHeight = math.sin(self._clock * state.HoverFrequency * math.pi * 2) * state.HoverAmplitude
-	return subjectCFrame * state.Offset * self._extraOffset * CFrame.new(0, hoverHeight, 0)
+	return lookRig * state.Offset * self._extraOffset * CFrame.new(0, hoverHeight, 0)
 end
 
 -- Action-layer offset at the current elapsed time (keyframe walk with easing)
@@ -112,13 +132,13 @@ function CameraSystem._computeActionWeight(activeAction: ActiveAction): number
 end
 
 -- Advances the action timeline and blends it over the state camera
-function CameraSystem._applyActionLayer(self: CameraController, subjectCFrame: CFrame, stateCFrame: CFrame, deltaTime: number): CFrame
+function CameraSystem._applyActionLayer(self: CameraController, lookRig: CFrame, stateCFrame: CFrame, deltaTime: number): CFrame
 	local activeAction = self._activeAction
 	if not activeAction then return stateCFrame end
 
 	activeAction.Elapsed += deltaTime
 	-- Extra offset applies here too, so shoulder-cam style offsets survive actions
-	local actionCFrame = subjectCFrame * CameraSystem._computeActionOffset(self, activeAction) * self._extraOffset
+	local actionCFrame = lookRig * CameraSystem._computeActionOffset(self, activeAction) * self._extraOffset
 	local actionWeight = CameraSystem._computeActionWeight(activeAction)
 
 	-- Release once the return blend has fully handed control back to the state layer
@@ -139,14 +159,16 @@ function CameraSystem.Update(self: CameraController, deltaTime: number)
 	end
 
 	self._clock += deltaTime
-	local subjectCFrame = subject.CFrame
-	local stateGoal = CameraSystem._computeStateCFrame(self, subjectCFrame)
+	-- The rig is subject position + mouse-look rotation; subject facing plays no part
+	local lookRig = CFrame.new(subject.Position) * CFrame.fromEulerAnglesYXZ(self._lookPitch, self._lookYaw, 0)
+	local stateGoal = CameraSystem._computeStateCFrame(self, lookRig)
 
-	-- Exponential smoothing keeps follow speed framerate-independent
+	-- Exponential smoothing keeps follow speed framerate-independent; the CFrame
+	-- lerp blends rotation too, which is what makes mouse-look feel smooth
 	local smoothingAlpha = 1 - math.exp(-self._config.States[self.StateName].Smoothing * deltaTime)
 	local smoothedCFrame = self.Camera.CFrame:Lerp(stateGoal, smoothingAlpha)
 
-	self.Camera.CFrame = CameraSystem._applyActionLayer(self, subjectCFrame, smoothedCFrame, deltaTime)
+	self.Camera.CFrame = CameraSystem._applyActionLayer(self, lookRig, smoothedCFrame, deltaTime)
 end
 
 -- Restores the camera type and clears live references; controller is dead after this

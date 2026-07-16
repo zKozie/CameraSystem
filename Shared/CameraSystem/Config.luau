@@ -10,16 +10,20 @@ return {
 	InitialState = "Walking",
 	DefaultReturnTime = 0.4,
 
+	-- How far the mouse-look may pitch; the 60-degree facing rule is game-side
+	PitchLimits = { Min = math.rad(-80), Max = math.rad(80) },
+
 	States = {
 		Walking = {
-			Offset = CFrame.new(0, 2, 10),
+			-- +3 X puts the camera over the right shoulder (~20 degrees horizontal)
+			Offset = CFrame.new(3, 2, 10),
 			HoverAmplitude = 0.15,
 			HoverFrequency = 0.8,
 			Smoothing = 8,
 		},
 		Running = {
 			-- Pulled back and higher than Walking, with a stronger faster bob
-			Offset = CFrame.new(0, 2.5, 12),
+			Offset = CFrame.new(3, 2.5, 12),
 			HoverAmplitude = 0.35,
 			HoverFrequency = 1.6,
 			Smoothing = 12,
