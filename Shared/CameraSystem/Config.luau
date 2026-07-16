@@ -7,13 +7,20 @@ local Types = require(script.Parent.Types)
 -- camera gains behaviours. Offsets are relative to the subject's CFrame,
 -- so +Z sits behind a subject facing -Z (HumanoidRootPart convention).
 return {
-	InitialState = "Walking",
+	InitialState = "Idle",
 	DefaultReturnTime = 0.4,
 
-	-- How far the mouse-look may pitch; the 60-degree facing rule is game-side
+	-- How far the mouse-look may pitch
 	PitchLimits = { Min = math.rad(-80), Max = math.rad(80) },
 
 	States = {
+		Idle = {
+			-- Same framing as Walking with no bob — the camera holds still while idle
+			Offset = CFrame.new(3, 2, 10),
+			HoverAmplitude = 0,
+			HoverFrequency = 0,
+			Smoothing = 8,
+		},
 		Walking = {
 			-- +3 X puts the camera over the right shoulder (~20 degrees horizontal)
 			Offset = CFrame.new(3, 2, 10),
