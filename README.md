@@ -70,6 +70,7 @@ controller:PlayAction("Impact")  -- one-shot; blends back to Running when done
 - `CameraSystem.new(camera, config)` — builds the controller, sets the camera `Scriptable`, and enters `config.InitialState`.
 - `controller:SetSubject(part)` — the part the camera follows; `Update` is a no-op while `nil` (pass `nil` between respawns).
 - `controller:SetState(name)` — switches the state-layer truth; the camera converges there at the new state's `Smoothing` rate.
+- `controller:SetOffset(offset)` — runtime offset composed after every state/action offset (shoulder cam, aiming). Persists across state changes and actions; `nil` clears it.
 - `controller:PlayAction(name)` — starts a one-shot action, replacing any action already playing.
 - `controller:Update(deltaTime)` — advances both layers and writes the camera CFrame; call every RenderStep.
 - `controller:Destroy()` — restores the previous `CameraType` and clears live references.
@@ -106,6 +107,22 @@ return {
     },
 }
 ```
+
+---
+
+## Full Control
+
+The controller owns the camera completely while alive:
+
+- `CameraType = Scriptable` is set at construction and **re-asserted every `Update`** — Roblox core scripts reset it on respawn and seating, and the controller wins that fight.
+- With `Scriptable` held, player scroll-zoom and orbit input have no effect. For belt-and-suspenders zoom locking, also equalize the zoom range on the client:
+
+```lua
+local localPlayer = game:GetService("Players").LocalPlayer
+localPlayer.CameraMaxZoomDistance = localPlayer.CameraMinZoomDistance
+```
+
+- `Destroy` restores the `CameraType` captured at construction, handing the camera back to Roblox.
 
 ---
 

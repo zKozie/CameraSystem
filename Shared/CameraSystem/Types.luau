@@ -49,9 +49,10 @@ export type ActiveAction = {
 }
 
 -- A camera controller returned by CameraSystem.new.
--- Owned by CameraSystem. Takes the camera Scriptable on construction and
--- restores the previous CameraType on Destroy. Drive Update externally
--- (RenderStep) — the controller never binds its own loop.
+-- Owned by CameraSystem. Takes the camera Scriptable on construction,
+-- re-asserts it every Update (full control — core scripts reset it on
+-- respawn), and restores the previous CameraType on Destroy. Drive Update
+-- externally (RenderStep) — the controller never binds its own loop.
 -- Underscore fields are internal bookkeeping; consume the methods only.
 export type CameraController = {
 	Camera: Camera, -- camera being driven, captured at construction
@@ -59,12 +60,14 @@ export type CameraController = {
 	Subject: BasePart?, -- part the camera follows; Update is a no-op while nil
 	SetSubject: (self: CameraController, subject: BasePart?) -> (),
 	SetState: (self: CameraController, stateName: string) -> (),
+	SetOffset: (self: CameraController, offset: CFrame?) -> (),
 	PlayAction: (self: CameraController, actionName: string) -> (),
 	Update: (self: CameraController, deltaTime: number) -> (),
 	Destroy: (self: CameraController) -> (),
 	_config: CameraConfig, -- internal: config captured at construction
 	_clock: number, -- internal: accumulated time driving the hover bob
 	_activeAction: ActiveAction?, -- internal: nil when no action is playing
+	_extraOffset: CFrame, -- internal: runtime offset from SetOffset; identity when unset
 	_previousCameraType: Enum.CameraType, -- internal: restored on Destroy
 }
 

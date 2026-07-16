@@ -34,6 +34,7 @@ function CameraSystem.new(camera: Camera, config: CameraConfig): CameraControlle
 	self._config = config
 	self._clock = 0
 	self._activeAction = nil
+	self._extraOffset = CFrame.identity
 	self._previousCameraType = camera.CameraType
 
 	camera.CameraType = Enum.CameraType.Scriptable
@@ -43,6 +44,12 @@ end
 -- Points the camera at a new subject; nil freezes the camera until one is set
 function CameraSystem.SetSubject(self: CameraController, subject: BasePart?)
 	self.Subject = subject
+end
+
+-- Sets a runtime offset composed after every state/action offset (shoulder cam,
+-- aiming); persists across state changes and actions, nil clears it
+function CameraSystem.SetOffset(self: CameraController, offset: CFrame?)
+	self._extraOffset = offset or CFrame.identity
 end
 
 -- Switches the state-layer truth; takes effect on the next Update
@@ -68,7 +75,7 @@ end
 function CameraSystem._computeStateCFrame(self: CameraController, subjectCFrame: CFrame): CFrame
 	local state = self._config.States[self.StateName]
 	local hoverHeight = math.sin(self._clock * state.HoverFrequency * math.pi * 2) * state.HoverAmplitude
-	return subjectCFrame * state.Offset * CFrame.new(0, hoverHeight, 0)
+	return subjectCFrame * state.Offset * self._extraOffset * CFrame.new(0, hoverHeight, 0)
 end
 
 -- Action-layer offset at the current elapsed time (keyframe walk with easing)
@@ -110,7 +117,8 @@ function CameraSystem._applyActionLayer(self: CameraController, subjectCFrame: C
 	if not activeAction then return stateCFrame end
 
 	activeAction.Elapsed += deltaTime
-	local actionCFrame = subjectCFrame * CameraSystem._computeActionOffset(self, activeAction)
+	-- Extra offset applies here too, so shoulder-cam style offsets survive actions
+	local actionCFrame = subjectCFrame * CameraSystem._computeActionOffset(self, activeAction) * self._extraOffset
 	local actionWeight = CameraSystem._computeActionWeight(activeAction)
 
 	-- Release once the return blend has fully handed control back to the state layer
@@ -124,6 +132,11 @@ end
 function CameraSystem.Update(self: CameraController, deltaTime: number)
 	local subject = self.Subject
 	if not subject then return end
+
+	-- Core scripts reset CameraType on respawn/seating; full control means re-asserting it
+	if self.Camera.CameraType ~= Enum.CameraType.Scriptable then
+		self.Camera.CameraType = Enum.CameraType.Scriptable
+	end
 
 	self._clock += deltaTime
 	local subjectCFrame = subject.CFrame
