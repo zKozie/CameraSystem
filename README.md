@@ -19,8 +19,9 @@ CameraSystem/
 └── Shared/
     └── CameraSystem/       → place into ReplicatedStorage
         ├── init.luau       → the controller implementation
+        ├── ActionLayer.luau→ keyframe playback math for one-shot actions
         ├── Types.luau      → CameraConfig / CameraController type exports
-        └── Config.luau     → shipped config template (Walking / Running states)
+        └── Config.luau     → shipped config template (Idle / Walking / Running states)
 ```
 
 **Shared** owns the whole system — the controller is pure logic against a `Camera` and a `BasePart` subject, so it lives in ReplicatedStorage. Only clients should construct it, since only the local client owns its camera.
@@ -134,7 +135,8 @@ local localPlayer = game:GetService("Players").LocalPlayer
 localPlayer.CameraMaxZoomDistance = localPlayer.CameraMinZoomDistance
 ```
 
-- The mouse cursor is hidden (`MouseIconEnabled = false`) for the controller's lifetime.
+- The mouse cursor is hidden (`MouseIconEnabled = false`) for the controller's lifetime — re-asserted every `Update`, since core scripts re-enable it.
+- **Wall occlusion**: every `Update` raycasts from the subject to the goal position and pulls the camera in front of anything hit, so walls never sit between the camera and the character. The ray excludes the subject's own model and ignores `CanCollide = false` decoration.
 - `Destroy` restores the `CameraType` and cursor visibility captured at construction, handing the camera back to Roblox.
 - Disable Roblox's own shift-lock switch so it can't fight the rig — it's a Studio/Rojo property, out of a LocalScript's reach: set `StarterPlayer.EnableMouseLockOption = false` (in Rojo: `"StarterPlayer": { "$properties": { "EnableMouseLockOption": false } }`).
 

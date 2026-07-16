@@ -81,6 +81,7 @@ export type CameraController = {
 	_extraOffset: CFrame, -- internal: runtime offset from SetOffset; identity when unset
 	_lookYaw: number, -- internal: horizontal look angle in radians, mouse-driven
 	_lookPitch: number, -- internal: vertical look angle in radians, clamped to PitchLimits
+	_occlusionParams: RaycastParams, -- internal: excludes the subject's rig, set by SetSubject
 	_previousMouseIconEnabled: boolean, -- internal: cursor visibility restored on Destroy
 	_previousCameraType: Enum.CameraType, -- internal: restored on Destroy
 }

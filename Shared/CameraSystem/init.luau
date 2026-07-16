@@ -1,30 +1,24 @@
 --!strict
 
 --// SERVICES
-local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
+
+--// MODULES
+local ActionLayer = require(script.ActionLayer)
 
 --// TYPES
 local Types = require(script.Types)
 type CameraConfig = Types.CameraConfig
 type CameraController = Types.CameraController
-type CameraActionEntry = Types.CameraActionEntry
-type ActiveAction = Types.ActiveAction
 
 --// MAIN
 local CameraSystem = {}
 CameraSystem.__index = CameraSystem
 
--- Sums an action's keyframe durations; cached once when the action starts
-function CameraSystem._resolveKeyframeLength(action: CameraActionEntry): number
-	local keyframeLength = 0
-	for _, keyframe in action.Keyframes do
-		keyframeLength += keyframe.Duration
-	end
-	return keyframeLength
-end
+local OBSTRUCTION_BUFFER = 0.3 -- studs kept between the camera and a hit surface
 
--- Builds a controller for one camera: takes it Scriptable and enters InitialState
+-- Builds a controller for one camera: takes it Scriptable, hides the cursor
+-- and enters InitialState
 function CameraSystem.new(camera: Camera, config: CameraConfig): CameraController
 	assert(config.States[config.InitialState], "InitialState not found in States: " .. config.InitialState)
 
@@ -38,11 +32,11 @@ function CameraSystem.new(camera: Camera, config: CameraConfig): CameraControlle
 	self._extraOffset = CFrame.identity
 	self._lookYaw = 0
 	self._lookPitch = 0
+	self._occlusionParams = RaycastParams.new()
 	self._previousCameraType = camera.CameraType
 	self._previousMouseIconEnabled = UserInputService.MouseIconEnabled
 
 	camera.CameraType = Enum.CameraType.Scriptable
-	-- Full control includes the cursor: hidden for the controller's lifetime
 	UserInputService.MouseIconEnabled = false
 	return self
 end
@@ -56,6 +50,12 @@ function CameraSystem.SetSubject(self: CameraController, subject: BasePart?)
 	local subjectFacing = subject.CFrame.LookVector
 	self._lookYaw = math.atan2(-subjectFacing.X, -subjectFacing.Z)
 	self._lookPitch = 0
+
+	-- Obstruction rays ignore the subject's own rig and anything non-collidable
+	local subjectRig: Instance = subject:FindFirstAncestorOfClass("Model") or subject
+	self._occlusionParams.FilterType = Enum.RaycastFilterType.Exclude
+	self._occlusionParams.FilterDescendantsInstances = { subjectRig }
+	self._occlusionParams.RespectCanCollide = true
 end
 
 -- Steers the look rig by radians; pitch is clamped to config.PitchLimits
@@ -86,13 +86,7 @@ end
 function CameraSystem.PlayAction(self: CameraController, actionName: string)
 	local action = self._config.Actions[actionName]
 	assert(action, "Unknown camera action: " .. actionName)
-
-	self._activeAction = {
-		Entry = action,
-		Elapsed = 0,
-		KeyframeLength = CameraSystem._resolveKeyframeLength(action),
-		ReturnTime = action.ReturnTime or self._config.DefaultReturnTime,
-	}
+	self._activeAction = ActionLayer.start(action, self._config.DefaultReturnTime)
 end
 
 -- State-layer goal: look rig * state offset * vertical hover bob
@@ -102,54 +96,29 @@ function CameraSystem._computeStateCFrame(self: CameraController, lookRig: CFram
 	return lookRig * state.Offset * self._extraOffset * CFrame.new(0, hoverHeight, 0)
 end
 
--- Action-layer offset at the current elapsed time (keyframe walk with easing)
-function CameraSystem._computeActionOffset(self: CameraController, activeAction: ActiveAction): CFrame
-	-- The active state's offset acts as the implicit starting keyframe
-	local previousOffset = self._config.States[self.StateName].Offset
-	local segmentTime = math.min(activeAction.Elapsed, activeAction.KeyframeLength)
-
-	for _, keyframe in activeAction.Entry.Keyframes do
-		if segmentTime >= keyframe.Duration then
-			segmentTime -= keyframe.Duration
-			previousOffset = keyframe.Offset
-			continue
-		end
-		local easedAlpha = TweenService:GetValue(
-			segmentTime / keyframe.Duration,
-			keyframe.EasingStyle or Enum.EasingStyle.Quad,
-			keyframe.EasingDirection or Enum.EasingDirection.Out
-		)
-		return previousOffset:Lerp(keyframe.Offset, easedAlpha)
-	end
-	-- Past the last keyframe: hold its offset while the return blend runs
-	return previousOffset
-end
-
--- Blend weight of the action layer: 1 during keyframes, eased 1 -> 0 over ReturnTime
-function CameraSystem._computeActionWeight(activeAction: ActiveAction): number
-	local returnElapsed = activeAction.Elapsed - activeAction.KeyframeLength
-	if returnElapsed <= 0 then return 1 end
-	if returnElapsed >= activeAction.ReturnTime then return 0 end
-
-	local returnAlpha = returnElapsed / activeAction.ReturnTime
-	return 1 - TweenService:GetValue(returnAlpha, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
-end
-
 -- Advances the action timeline and blends it over the state camera
 function CameraSystem._applyActionLayer(self: CameraController, lookRig: CFrame, stateCFrame: CFrame, deltaTime: number): CFrame
 	local activeAction = self._activeAction
 	if not activeAction then return stateCFrame end
 
-	activeAction.Elapsed += deltaTime
-	-- Extra offset applies here too, so shoulder-cam style offsets survive actions
-	local actionCFrame = lookRig * CameraSystem._computeActionOffset(self, activeAction) * self._extraOffset
-	local actionWeight = CameraSystem._computeActionWeight(activeAction)
-
-	-- Release once the return blend has fully handed control back to the state layer
-	if activeAction.Elapsed >= activeAction.KeyframeLength + activeAction.ReturnTime then
+	-- The active state's offset acts as the action's implicit starting keyframe
+	local startOffset = self._config.States[self.StateName].Offset
+	local blendedCFrame, isFinished = ActionLayer.apply(activeAction, lookRig, stateCFrame, startOffset, self._extraOffset, deltaTime)
+	if isFinished then
 		self._activeAction = nil
 	end
-	return stateCFrame:Lerp(actionCFrame, actionWeight)
+	return blendedCFrame
+end
+
+-- Pulls the camera in front of any geometry between the subject and its goal,
+-- so walls never end up between the two
+function CameraSystem._resolveObstruction(self: CameraController, subjectPosition: Vector3, goalCFrame: CFrame): CFrame
+	local toCamera = goalCFrame.Position - subjectPosition
+	local obstructionHit = workspace:Raycast(subjectPosition, toCamera, self._occlusionParams)
+	if not obstructionHit then return goalCFrame end
+
+	local pulledPosition = obstructionHit.Position - toCamera.Unit * OBSTRUCTION_BUFFER
+	return goalCFrame.Rotation + pulledPosition
 end
 
 -- Advances both layers and writes the final camera CFrame; call every RenderStep
@@ -157,9 +126,12 @@ function CameraSystem.Update(self: CameraController, deltaTime: number)
 	local subject = self.Subject
 	if not subject then return end
 
-	-- Core scripts reset CameraType on respawn/seating; full control means re-asserting it
+	-- Core scripts reclaim these on respawn/state changes; full control re-asserts both
 	if self.Camera.CameraType ~= Enum.CameraType.Scriptable then
 		self.Camera.CameraType = Enum.CameraType.Scriptable
+	end
+	if UserInputService.MouseIconEnabled then
+		UserInputService.MouseIconEnabled = false
 	end
 
 	self._clock += deltaTime
@@ -172,7 +144,8 @@ function CameraSystem.Update(self: CameraController, deltaTime: number)
 	local smoothingAlpha = 1 - math.exp(-self._config.States[self.StateName].Smoothing * deltaTime)
 	local smoothedCFrame = self.Camera.CFrame:Lerp(stateGoal, smoothingAlpha)
 
-	self.Camera.CFrame = CameraSystem._applyActionLayer(self, lookRig, smoothedCFrame, deltaTime)
+	local blendedCFrame = CameraSystem._applyActionLayer(self, lookRig, smoothedCFrame, deltaTime)
+	self.Camera.CFrame = CameraSystem._resolveObstruction(self, subject.Position, blendedCFrame)
 end
 
 -- Restores the camera type and cursor and clears live references; controller is dead after this
